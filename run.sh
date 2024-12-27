@@ -13,9 +13,12 @@ lines=$(tail -n 10000 "$log_file")
 current_time=$(date +%s)
 one_minute_ago=$((current_time - 6000))
 
-# Store sent email information
-declare -A sent_emails
-declare -A email_subjects
+# Store email information in variables
+email_id=""
+sender=""
+receiver=""
+subject=""
+timestamp=""
 
 # Process log lines for sent and received emails
 echo "Processing log lines..."
@@ -27,60 +30,49 @@ echo "$lines" | while read line; do
 
     # If the email timestamp is within the last minute
     if [ "$timestamp_epoch" -gt "$one_minute_ago" ]; then
-        # Extract the sender and receiver based on the new format
+        # Extract the sender, receiver, subject, and email ID
+        email_id=$(echo "$line" | grep -oP '^\S+')
         sender=$(echo "$line" | grep -oP '(?<=<= ).*?(?= H=)')
-        receiver=$(echo "$line" | grep -oP '(?<=for ).*?(?=$| )')
-
-        # Extract the subject
+        receivers=$(echo "$line" | grep -oP '(?<=for ).*?(?=$| )')
         subject=$(echo "$line" | grep -oP 'T="\K[^"]+')
 
-        # Check if subject is empty, if so, set it to "بدون عنوان"
-        if [[ -z "$subject" ]]; then
-            subject="بدون عنوان"
+        # If sender, receiver(s), and subject are found, store them
+        if [[ -n "$email_id" && -n "$sender" && -n "$receivers" && -n "$subject" ]]; then
+            echo "Found email ID: $email_id, sender: $sender, receivers: $receivers, subject: $subject"
+            stored_email_id="$email_id"
+            stored_sender="$sender"
+            stored_receivers="$receivers"
+            stored_subject="$subject"
+            stored_timestamp="$timestamp"
         fi
 
-        # Skip if the receiver has "+spam" in their address (indicating it went to spam)
-        if [[ "$receiver" =~ \+spam ]]; then
-            continue
-        fi
-
-        # Store email information when sent
-        if [[ -n "$sender" && -n "$receiver" && -n "$subject" ]]; then
-            sent_emails["$sender,$receiver"]="$timestamp"
-            email_subjects["$sender,$receiver"]="$subject"
-            echo "Stored email from $sender to $receiver with subject: $subject"
-        fi
-
-        # Check for email delivery to receiver
-        if [[ "$line" =~ "Saved" && "$line" =~ "for $receiver" ]]; then
-            echo "Email delivered to $receiver at $timestamp"
-
-            # Check for matching sender and receiver in stored data
-            for key in "${!sent_emails[@]}"; do
-                IFS=',' read -r stored_sender stored_receiver <<< "$key"
-                if [[ "$sender" == "$stored_sender" && "$receiver" == "$stored_receiver" ]]; then
-                    echo "Found match for email from $sender to $receiver"
-
-                    # Use the stored subject from the email_subjects array
-                    stored_subject="${email_subjects["$sender,$receiver"]}"
-
-                    # Send data to API
-                    if [[ -n "$stored_subject" ]]; then
-                        curl -X POST "$api_url" \
-                            -d "sender=$sender" \
-                            -d "receiver=$receiver" \
-                            -d "subject=$stored_subject" \
-                            -d "timestamp=$timestamp"
-                        echo "Email information sent: $stored_subject"
-                    else
-                        echo "Subject missing, not sending to API."
-                    fi
-                    unset sent_emails["$key"]  # Remove sent email information after sending
-                    unset email_subjects["$key"]  # Remove subject from memory after sending
-                    break
+        # Split receivers and process each separately
+        IFS=" " read -r -a receiver_array <<< "$stored_receivers"
+        for stored_receiver in "${receiver_array[@]}"; do
+            # Check for email delivery confirmation (either successful or to spam)
+            if [[ "$line" =~ "$stored_email_id" && "$line" =~ "Saved" && "$line" =~ "for $stored_receiver" ]]; then
+                if [[ ! "$line" =~ "shonizpams+spam" ]]; then
+                    # Successful delivery
+                    echo "Email successfully delivered to $stored_receiver at $timestamp with subject: $stored_subject"
+                    curl -X POST "$api_url" \
+                        -d "sender=$stored_sender" \
+                        -d "receiver=$stored_receiver" \
+                        -d "subject=$stored_subject" \
+                        -d "timestamp=$stored_timestamp"
+                    echo "Email information sent to API: $stored_subject"
+                else
+                    # Email delivered to spam
+                    echo "Email delivered to spam for $stored_receiver: $stored_subject"
                 fi
-            done
-        fi
+            fi
+        done
+
+        # Clear stored variables after processing
+        stored_email_id=""
+        stored_sender=""
+        stored_receivers=""
+        stored_subject=""
+        stored_timestamp=""
     fi
 done
 
