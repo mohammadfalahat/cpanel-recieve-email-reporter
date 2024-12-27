@@ -15,6 +15,7 @@ one_minute_ago=$((current_time - 6000))
 
 # Store sent email information
 declare -A sent_emails
+declare -A email_subjects
 
 # Process log lines for sent and received emails
 echo "Processing log lines..."
@@ -30,50 +31,47 @@ echo "$lines" | while read line; do
         sender=$(echo "$line" | grep -oP '(?<=<= ).*?(?= H=)')
         receiver=$(echo "$line" | grep -oP '(?<=for ).*?(?=$| )')
 
-        # Check if sender and receiver were found
-        if [[ -z "$sender" || -z "$receiver" ]]; then
-            # Check for email delivery confirmation without sender/receiver format
-            if [[ "$line" =~ "Saved" ]]; then
-                # If email has been delivered to the receiver, extract the receiver and subject
-                receiver=$(echo "$line" | grep -oP '(?<=for ).*?(?=$| )')
-                subject=$(echo "$line" | grep -oP 'T="\K[^"]+')
-                echo "Email delivered to $receiver at $timestamp with subject: $subject"
+        # Extract the subject
+        subject=$(echo "$line" | grep -oP 'T="\K[^"]+')
 
-                # Send data to API
-                curl -X POST "$api_url" \
-                    -d "sender=unknown" \
-                    -d "receiver=$receiver" \
-                    -d "subject=$subject" \
-                    -d "timestamp=$timestamp"
-                echo "Email information sent to API: $subject"
-            fi
+        # Skip if the receiver has "+spam" in their address (indicating it went to spam)
+        if [[ "$receiver" =~ \+spam ]]; then
             continue
         fi
 
-        echo "Found sender: $sender, receiver: $receiver"
-
-        # Check for sent email
-        if [[ "$line" =~ "=> $receiver" && "$line" =~ "for $receiver" ]]; then
-            echo "Email sent from $sender to $receiver at $timestamp"
-            # Store sent email information in the array
+        # Store email information when sent
+        if [[ -n "$sender" && -n "$receiver" && -n "$subject" ]]; then
             sent_emails["$sender,$receiver"]="$timestamp"
+            email_subjects["$sender,$receiver"]="$subject"
+            echo "Stored email from $sender to $receiver with subject: $subject"
+        fi
+
         # Check for email delivery to receiver
-        elif [[ "$line" =~ "Saved" && "$line" =~ "for $receiver" ]]; then
+        if [[ "$line" =~ "Saved" && "$line" =~ "for $receiver" ]]; then
             echo "Email delivered to $receiver at $timestamp"
+
             # Check for matching sender and receiver in stored data
             for key in "${!sent_emails[@]}"; do
                 IFS=',' read -r stored_sender stored_receiver <<< "$key"
                 if [[ "$sender" == "$stored_sender" && "$receiver" == "$stored_receiver" ]]; then
                     echo "Found match for email from $sender to $receiver"
-                    # If match found, send data to API
-                    subject=$(echo "$line" | grep -oP 'T="\K[^"]+')
-                    curl -X POST "$api_url" \
-                        -d "sender=$sender" \
-                        -d "receiver=$receiver" \
-                        -d "subject=$subject" \
-                        -d "timestamp=$timestamp"
-                    echo "Email information sent: $subject"
+
+                    # Use the stored subject from the email_subjects array
+                    stored_subject="${email_subjects["$sender,$receiver"]}"
+
+                    # Send data to API
+                    if [[ -n "$stored_subject" ]]; then
+                        curl -X POST "$api_url" \
+                            -d "sender=$sender" \
+                            -d "receiver=$receiver" \
+                            -d "subject=$stored_subject" \
+                            -d "timestamp=$timestamp"
+                        echo "Email information sent: $stored_subject"
+                    else
+                        echo "Subject missing, not sending to API."
+                    fi
                     unset sent_emails["$key"]  # Remove sent email information after sending
+                    unset email_subjects["$key"]  # Remove subject from memory after sending
                     break
                 fi
             done
