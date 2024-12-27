@@ -34,6 +34,11 @@ echo "$lines" | while read line; do
         # Extract the subject
         subject=$(echo "$line" | grep -oP 'T="\K[^"]+')
 
+        # Check if subject is empty, if so, set it to "بدون عنوان"
+        if [[ -z "$subject" ]]; then
+            subject="بدون عنوان"
+        fi
+
         # Skip if the receiver has "+spam" in their address (indicating it went to spam)
         if [[ "$receiver" =~ \+spam ]]; then
             continue
