@@ -1,79 +1,73 @@
 #!/bin/bash
 
-# Log file path
-log_file="/var/log/exim_mainlog"
+EMAIL_FILE="/tmp/email_$(date +%s)_$$.txt"
+LOG_FILE="/tmp/filter_email.log"
+MAIL_DIR="/home/shonizgl/mail/shoniz.com"
+SENT_FILE="/tmp/sent_messages.txt"
 
-# API URL for sending data
-api_url="https://shoniz.com/mailforwarder/mailforwarder.php"
+# Save the incoming email to a temporary file
+cat > "$EMAIL_FILE"
 
-# Check last 10000 lines of the log
-lines=$(tail -n 10000 "$log_file")
+# Check if the email has already been processed
+if grep -q "X-Processed-By: MyScript" "$EMAIL_FILE"; then
+    echo "$(date): Email already processed. Skipping." >> "$LOG_FILE"
+    rm -f "$EMAIL_FILE"
+    exit 0
+fi
 
-# Current time and 10 minutes ago
-current_time=$(date +%s)
-one_minute_ago=$((current_time - 6000))
+# Extract Message-ID from the email
+MESSAGE_ID=$(grep -i "^Message-ID:" "$EMAIL_FILE" | sed 's/^Message-ID: //I')
 
-# Store email information in variables
-email_id=""
-sender=""
-receiver=""
-subject=""
-timestamp=""
+# Check if the Message-ID is in the sent file
+#if grep -q "$MESSAGE_ID" "$SENT_FILE"; then
+if tail -n 50 "$SENT_FILE" | grep -q "$MESSAGE_ID"; then
+    echo "$(date): Duplicate Message-ID found. Skipping email." >> "$LOG_FILE"
+    rm -f "$EMAIL_FILE"
+    exit 0
+fi
 
-# Process log lines for sent and received emails
-echo "Processing log lines..."
+# Extract fields for logging
+DATE=$(date +"%Y-%m-%d %H:%M:%S")
+SUBJECT=$(grep -i "^Subject: " "$EMAIL_FILE" | sed 's/^Subject: //I')
+FROM=$(grep -i "^From: " "$EMAIL_FILE" | sed 's/^From: //I')
 
-echo "$lines" | while read line; do
-    # Check email timestamp and convert to epoch
-    timestamp=$(echo "$line" | grep -oP '\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}' | head -n 1)
-    timestamp_epoch=$(date -d "$timestamp" +%s)
+# Extract recipients
+TO=$(grep -i "^To: " "$EMAIL_FILE" | sed 's/^To: //I')
+CC=$(grep -i "^Cc: " "$EMAIL_FILE" | sed 's/^Cc: //I')
+BCC=$(grep -i "^Bcc: " "$EMAIL_FILE" | sed 's/^Bcc: //I')
 
-    # If the email timestamp is within the last minute
-    if [ "$timestamp_epoch" -gt "$one_minute_ago" ]; then
-        # Extract the sender, receiver, subject, and email ID
-        email_id=$(echo "$line" | grep -oP '^\S+')
-        sender=$(echo "$line" | grep -oP '(?<=<= ).*?(?= H=)')
-        receivers=$(echo "$line" | grep -oP '(?<=for ).*?(?=$| )')
-        subject=$(echo "$line" | grep -oP 'T="\K[^"]+')
+# Extract email addresses only (ignoring names)
+RECIPIENTS=$(echo "$TO,$CC,$BCC" | tr -d '\r' | tr ',' '\n' | sed '/^$/d' | sed -E 's/.*<([^>]+)>.*/\1/' | xargs)
 
-        # If sender, receiver(s), and subject are found, store them
-        if [[ -n "$email_id" && -n "$sender" && -n "$receivers" && -n "$subject" ]]; then
-            echo "Found email ID: $email_id, sender: $sender, receivers: $receivers, subject: $subject"
-            stored_email_id="$email_id"
-            stored_sender="$sender"
-            stored_receivers="$receivers"
-            stored_subject="$subject"
-            stored_timestamp="$timestamp"
-        fi
+# Log email details
+echo "$(date): Processing email" >> "$LOG_FILE"
+echo "Date: $DATE" >> "$LOG_FILE"
+echo "From: $FROM" >> "$LOG_FILE"
+echo "To: $TO" >> "$LOG_FILE"
+echo "Cc: $CC" >> "$LOG_FILE"
+echo "Bcc: $BCC" >> "$LOG_FILE"
+echo "Subject: $SUBJECT" >> "$LOG_FILE"
+echo "---" >> "$LOG_FILE"
 
-        # Split receivers and process each separately
-        IFS=" " read -r -a receiver_array <<< "$stored_receivers"
-        for stored_receiver in "${receiver_array[@]}"; do
-            # Check for email delivery confirmation (either successful or to spam)
-            if [[ "$line" =~ "$stored_email_id" && "$line" =~ "Saved" && "$line" =~ "for $stored_receiver" ]]; then
-                if [[ ! "$line" =~ "shonizpams+spam" ]]; then
-                    # Successful delivery
-                    echo "Email successfully delivered to $stored_receiver at $timestamp with subject: $stored_subject"
-                    curl -X POST "$api_url" \
-                        -d "sender=$stored_sender" \
-                        -d "receiver=$stored_receiver" \
-                        -d "subject=$stored_subject" \
-                        -d "timestamp=$stored_timestamp"
-                    echo "Email information sent to API: $stored_subject"
-                else
-                    # Email delivered to spam
-                    echo "Email delivered to spam for $stored_receiver: $stored_subject"
-                fi
-            fi
-        done
+# Insert a custom header (X-Processed-By) between the X-YourOrg-MailScanner headers
+awk '
+  BEGIN { processed = 0 }
+  /X-YourOrg-MailScanner-From:/ { 
+    print $0; 
+    if (processed == 0) { 
+      print "X-Processed-By: MyScript"; 
+      processed = 1; 
+    } 
+    next 
+  }
+  { print $0 }' "$EMAIL_FILE" > "${EMAIL_FILE}.processed"
 
-        # Clear stored variables after processing
-        stored_email_id=""
-        stored_sender=""
-        stored_receivers=""
-        stored_subject=""
-        stored_timestamp=""
-    fi
-done
+# Resend the email using sendmail
+sendmail -t < "${EMAIL_FILE}.processed"
 
-echo "Log processing complete."
+# Store the Message-ID in the sent file to prevent duplicate emails
+echo "$MESSAGE_ID" >> "$SENT_FILE"
+echo "$(date): Email sent and Message-ID stored." >> "$LOG_FILE"
+
+# Clean up temporary files
+rm -f "$EMAIL_FILE" "${EMAIL_FILE}.processed"
