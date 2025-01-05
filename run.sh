@@ -5,7 +5,7 @@ LOG_FILE="/tmp/filter_email.log"
 MAIL_DIR="/home/shonizgl/mail/shoniz.com"
 SENT_FILE="/tmp/sent_messages.txt"
 GRPC_API_URL="https://your-grpc-endpoint.com/api" # Replace with your gRPC API endpoint
-API_KEY="-"
+API_KEY="your-api-key" # Replace with your API key
 
 # Save the incoming email to a temporary file
 cat > "$EMAIL_FILE"
@@ -37,14 +37,14 @@ TO=$(grep -i "^To: " "$EMAIL_FILE" | sed 's/^To: //I')
 CC=$(grep -i "^Cc: " "$EMAIL_FILE" | sed 's/^Cc: //I')
 BCC=$(grep -i "^Bcc: " "$EMAIL_FILE" | sed 's/^Bcc: //I')
 
-# Process recipients into a single comma-separated list
-RECIPIENTS=$(echo "$TO,$CC,$BCC" | tr -d '\r' | tr ',' '\n' | sed '/^$/d' | sed -E 's/.*<([^>]+)>.*/\1/' | tr '\n' ',' | sed 's/,$//')
+# Process recipients into a single newline-separated list
+ALL_RECIPIENTS=$(echo "$TO,$CC,$BCC" | tr -d '\r' | tr ',' '\n' | sed '/^$/d' | sed -E 's/.*<([^>]+)>.*/\1/')
 
 # Log email details
 echo "$(date): Processing email" >> "$LOG_FILE"
 echo "Date: $DATE" >> "$LOG_FILE"
 echo "From: $FROM" >> "$LOG_FILE"
-echo "Recipients: $RECIPIENTS" >> "$LOG_FILE"
+echo "Recipients: $ALL_RECIPIENTS" >> "$LOG_FILE"
 echo "Subject: $SUBJECT" >> "$LOG_FILE"
 echo "---" >> "$LOG_FILE"
 
@@ -63,19 +63,31 @@ awk '
 
 # Resend the email using sendmail
 sendmail -t < "${EMAIL_FILE}.processed"
+echo "$(date): Email sent using sendmail." >> "$LOG_FILE"
 
-# Make the gRPC API call
-curl -X POST \
-    -H "Content-Type: application/json" \
-    -H "Authorization: ApiKey $API_KEY" \
-    -H "X-Processed-By: MyScript" \
-    -d "{\"from\":\"$FROM\",\"recipients\":\"$RECIPIENTS\",\"title\":\"$SUBJECT\"}" \
-    --http2 \
-    "$GRPC_API_URL" >> "$LOG_FILE" 2>&1
+# Make a gRPC API call for each recipient with @shoniz.com
+echo "$ALL_RECIPIENTS" | while read -r RECIPIENT; do
+    if [[ "$RECIPIENT" == *@shoniz.com ]]; then
+        echo "$(date): Making API call for recipient: $RECIPIENT" >> "$LOG_FILE"
+
+        # Make the API call
+        curl -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: ApiKey $API_KEY" \
+            -H "X-Processed-By: MyScript" \
+            -d "{\"from\":\"$FROM\",\"recipients\":\"$RECIPIENT\",\"title\":\"$SUBJECT\"}" \
+            --http2 \
+            "$GRPC_API_URL" >> "$LOG_FILE" 2>&1
+
+        echo "$(date): API call completed for recipient: $RECIPIENT" >> "$LOG_FILE"
+    else
+        echo "$(date): Skipping API call for recipient: $RECIPIENT (not @shoniz.com)" >> "$LOG_FILE"
+    fi
+done
 
 # Store the Message-ID in the sent file to prevent duplicate emails
 echo "$MESSAGE_ID" >> "$SENT_FILE"
-echo "$(date): Email processed, API call made, and Message-ID stored." >> "$LOG_FILE"
+echo "$(date): Email processed, API calls made where applicable, and Message-ID stored." >> "$LOG_FILE"
 
 # Clean up temporary files
 rm -f "$EMAIL_FILE" "${EMAIL_FILE}.processed"
