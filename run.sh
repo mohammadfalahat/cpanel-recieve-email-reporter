@@ -16,7 +16,7 @@ LOG_FILE="/tmp/filter_email.log"
 MAIL_DIR="/home/shonizgl/mail/shoniz.com"
 SENT_FILE="/tmp/sent_messages.txt"
 GRPC_API_URL="185.79.96.19:993" # Your gRPC API endpoint
-API_KEY="BCRSinvRAU4hheWx1hqg2S0Rb1iMP9U2pBqhgcW1hzXDtgP9l2" # Replace with your API key
+API_KEY="---" # Replace with your API key
 PROTO_FILE="/home/shonizgl/MessagingApiService.proto" # Path to the .proto file
 IMPORT_PATH="/home/shonizgl" # Path to the directory containing the .proto file
 
