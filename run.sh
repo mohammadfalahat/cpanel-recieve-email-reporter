@@ -4,8 +4,10 @@ EMAIL_FILE="/tmp/email_$(date +%s)_$$.txt"
 LOG_FILE="/tmp/filter_email.log"
 MAIL_DIR="/home/shonizgl/mail/shoniz.com"
 SENT_FILE="/tmp/sent_messages.txt"
-GRPC_API_URL="https://your-grpc-endpoint.com/api" # Replace with your gRPC API endpoint
-API_KEY="your-api-key" # Replace with your API key
+GRPC_API_URL="185.79.96.19:993" # Your gRPC API endpoint
+API_KEY="---" # Replace with your API key
+PROTO_FILE="/home/shonizgl/MessagingApiService.proto" # Path to the .proto file
+IMPORT_PATH="/home/shonizgl" # Path to the directory containing the .proto file
 
 # Save the incoming email to a temporary file
 cat > "$EMAIL_FILE"
@@ -70,14 +72,24 @@ echo "$ALL_RECIPIENTS" | while read -r RECIPIENT; do
     if [[ "$RECIPIENT" == *@shoniz.com ]]; then
         echo "$(date): Making API call for recipient: $RECIPIENT" >> "$LOG_FILE"
 
-        # Make the API call
-        curl -X POST \
-            -H "Content-Type: application/json" \
-            -H "Authorization: ApiKey $API_KEY" \
-            -H "X-Processed-By: MyScript" \
-            -d "{\"from\":\"$FROM\",\"recipients\":\"$RECIPIENT\",\"title\":\"$SUBJECT\"}" \
-            --http2 \
-            "$GRPC_API_URL" >> "$LOG_FILE" 2>&1
+        # Create the gRPC payload
+        MESSAGE="ﭗﯾﺎﻤﯾ ﺝﺪﯾﺩ ﺍﺯ ﻁﺮﻓ $FROM\nﻡﻮﺿﻮﻋ: $SUBJECT\nﺏﺭﺎﯾ ﺶﻣﺍ ﺍﺮﺳﺎﻟ ﺵﺪﻫ ﺎﺴﺗ. ﺏﺭﺎﯾ ﻢﺷﺎﻫﺪﻫ ﺂﻧ، ﻞﻄﻓﺍً ﺐﻫ ﺎﯿﻤﯿﻟ ﺥﻭﺩ ﻡﺭﺎﺠﻌﻫ ﻑﺮﻣﺎﯿﯾﺩ."
+        #MESSAGE="ﯽﮐ ﺎﯿﻤﯿﻟ ﺝﺪﯾﺩ ﺍﺯ ﻁﺮﻓ $FROM\nﺏﺍ ﻡﻮﺿﻮﻋ: $SUBJECT\nﺏﺭﺎﯾ ﺶﻣﺍ ﺍﺮﺳﺎﻟ ﺵﺪﻫ ﺎﺴﺗ، ﺏﺭﺎﯾ ﻢﺷﺎﻫﺪﻫ ﻢﺤﺗﻭﺎﯾ ﺎﯿﻤﯿﻟ ﺐﻫ ﺏﺮﻧﺎﻤﻫ ﻡﺪﯾﺮﯿﺗ ﺎﯿﻤﯿﻟ ﺥﻭﺩ ﻡﺭﺎﺠﻌﻫ ﻑﺮﻣﺎﯿﯾﺩ."
+        PAYLOAD=$(cat <<EOF
+{
+  "Email": "$RECIPIENT",
+  "Message": "$MESSAGE"
+}
+EOF
+)
+
+        # Make the API call using grpcurl
+        /root/go/bin/grpcurl -plaintext \
+            -H "x-api-key: $API_KEY" \
+            -d "$PAYLOAD" \
+            -proto $PROTO_FILE \
+            -import-path $IMPORT_PATH \
+            $GRPC_API_URL Ding.Contract.Messaging.MessagingApiService/NotifyMessage >> "$LOG_FILE" 2>&1
 
         echo "$(date): API call completed for recipient: $RECIPIENT" >> "$LOG_FILE"
     else
