@@ -39,13 +39,6 @@ IMPORT_PATH="/home/shonizgl" # Path to the directory containing the .proto file
 # Save the incoming email to a temporary file
 cat > "$EMAIL_FILE"
 
-# Check if the email has already been processed
-if grep -q "X-Processed-By: MyScript" "$EMAIL_FILE"; then
-    echo "$(date): Email already processed. Skipping." >> "$LOG_FILE"
-    rm -f "$EMAIL_FILE"
-    exit 0
-fi
-
 # Extract X-YourOrg-MailScanner-ID from the email
 MESSAGE_ID=$(grep -i "^X-YourOrg-MailScanner-ID:" "$EMAIL_FILE" | sed 's/^X-YourOrg-MailScanner-ID: //I')
 
@@ -103,7 +96,7 @@ echo "$ALL_RECIPIENTS" | while read -r RECIPIENT; do
 
         # Create the gRPC payload
         FROM=$(echo "$FROM" | sed 's/[<>]//g')
-        MESSAGE="ﺶﻣﺍ ﯽﮐ ﺎﯿﻤﯿﻟ ﺝﺪﯾﺩ ﺍﺯ ﻁﺮﻓ $FROM \nﺏﺍ ﻡﻮﺿﻮﻋ \\\"$SUBJECT\\\" ﺩﺮﯾﺎﻔﺗ ﻦﻣﻭﺪﻫ ﺎﯾﺩ.\nﻞﻄﻓﺍً ﺏﺭﺎﯾ ﻢﺷﺎﻫﺪﻫ ﺂﻧ ﺐﻫ ﺎﯿﻤﯿﻟ ﺥﻭﺩ ﻡﺭﺎﺠﻌﻫ ﻑﺮﻣﺎﯿﯾﺩ."
+        MESSAGE="شما یک ایمیل جدید از طرف $FROM \nبا موضوع \\\"$SUBJECT\\\" دریافت نموده اید.\nلطفاً برای مشاهده آن به ایمیل خود مراجعه فرمایید."
         PAYLOAD=$(cat <<EOF
 {
   "Email": "$RECIPIENT",
