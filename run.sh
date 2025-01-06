@@ -30,12 +30,12 @@ if grep -q "X-Processed-By: MyScript" "$EMAIL_FILE"; then
     exit 0
 fi
 
-# Extract Message-ID from the email
-MESSAGE_ID=$(grep -i "^Message-ID:" "$EMAIL_FILE" | sed 's/^Message-ID: //I')
+# Extract X-YourOrg-MailScanner-ID from the email
+MESSAGE_ID=$(grep -i "^X-YourOrg-MailScanner-ID:" "$EMAIL_FILE" | sed 's/^X-YourOrg-MailScanner-ID: //I')
 
-# Check if the Message-ID is in the sent file
+# Check if the X-YourOrg-MailScanner-ID is in the sent file
 if tail -n 50 "$SENT_FILE" | grep -q "$MESSAGE_ID"; then
-    echo "$(date): Duplicate Message-ID found. Skipping email." >> "$LOG_FILE"
+    echo "$(date): Duplicate X-YourOrg-MailScanner-ID found. Skipping email." >> "$LOG_FILE"
     rm -f "$EMAIL_FILE"
     exit 0
 fi
@@ -110,9 +110,9 @@ EOF
     fi
 done
 
-# Store the Message-ID in the sent file to prevent duplicate emails
+# Store the X-YourOrg-MailScanner-ID in the sent file to prevent duplicate emails
 echo "$MESSAGE_ID" >> "$SENT_FILE"
-echo "$(date): Email processed, API calls made where applicable, and Message-ID stored." >> "$LOG_FILE"
+echo "$(date): Email processed, API calls made where applicable, and X-YourOrg-MailScanner-ID stored." >> "$LOG_FILE"
 
 # Clean up temporary files
 rm -f "$EMAIL_FILE" "${EMAIL_FILE}.processed"
