@@ -1,11 +1,22 @@
 #!/bin/bash
 
+decode_utf8() {
+    local encoded_text="$1"
+    if [[ "$encoded_text" =~ =\?[Uu][Tt][Ff]-8\?B\?(.*)\?\= ]]; then
+        local base64_text="${BASH_REMATCH[1]}"
+        echo "$base64_text" | base64 --decode
+    else
+        echo "$encoded_text"
+    fi
+}
+
+
 EMAIL_FILE="/tmp/email_$(date +%s)_$$.txt"
 LOG_FILE="/tmp/filter_email.log"
 MAIL_DIR="/home/shonizgl/mail/shoniz.com"
 SENT_FILE="/tmp/sent_messages.txt"
 GRPC_API_URL="185.79.96.19:993" # Your gRPC API endpoint
-API_KEY="---" # Replace with your API key
+API_KEY="BCRSinvRAU4hheWx1hqg2S0Rb1iMP9U2pBqhgcW1hzXDtgP9l2" # Replace with your API key
 PROTO_FILE="/home/shonizgl/MessagingApiService.proto" # Path to the .proto file
 IMPORT_PATH="/home/shonizgl" # Path to the directory containing the .proto file
 
@@ -31,8 +42,10 @@ fi
 
 # Extract email details
 DATE=$(date +"%Y-%m-%d %H:%M:%S")
-SUBJECT=$(grep -i "^Subject: " "$EMAIL_FILE" | sed 's/^Subject: //I')
-FROM=$(grep -i "^From: " "$EMAIL_FILE" | sed 's/^From: //I')
+
+RAWSUBJECT=$(grep -i "^Subject: " "$EMAIL_FILE" | sed 's/^Subject: //I' | tr -d "\"\'\`")
+FROM=$(grep -i "^From: " "$EMAIL_FILE" | sed 's/^From: //I' | tr -d "\"\'\`" )
+SUBJECT=$(decode_utf8 "$RAWSUBJECT")
 
 # Extract recipients
 TO=$(grep -i "^To: " "$EMAIL_FILE" | sed 's/^To: //I')
@@ -73,8 +86,8 @@ echo "$ALL_RECIPIENTS" | while read -r RECIPIENT; do
         echo "$(date): Making API call for recipient: $RECIPIENT" >> "$LOG_FILE"
 
         # Create the gRPC payload
-        MESSAGE="ﭗﯾﺎﻤﯾ ﺝﺪﯾﺩ ﺍﺯ ﻁﺮﻓ $FROM\nﻡﻮﺿﻮﻋ: $SUBJECT\nﺏﺭﺎﯾ ﺶﻣﺍ ﺍﺮﺳﺎﻟ ﺵﺪﻫ ﺎﺴﺗ. ﺏﺭﺎﯾ ﻢﺷﺎﻫﺪﻫ ﺂﻧ، ﻞﻄﻓﺍً ﺐﻫ ﺎﯿﻤﯿﻟ ﺥﻭﺩ ﻡﺭﺎﺠﻌﻫ ﻑﺮﻣﺎﯿﯾﺩ."
-        #MESSAGE="ﯽﮐ ﺎﯿﻤﯿﻟ ﺝﺪﯾﺩ ﺍﺯ ﻁﺮﻓ $FROM\nﺏﺍ ﻡﻮﺿﻮﻋ: $SUBJECT\nﺏﺭﺎﯾ ﺶﻣﺍ ﺍﺮﺳﺎﻟ ﺵﺪﻫ ﺎﺴﺗ، ﺏﺭﺎﯾ ﻢﺷﺎﻫﺪﻫ ﻢﺤﺗﻭﺎﯾ ﺎﯿﻤﯿﻟ ﺐﻫ ﺏﺮﻧﺎﻤﻫ ﻡﺪﯾﺮﯿﺗ ﺎﯿﻤﯿﻟ ﺥﻭﺩ ﻡﺭﺎﺠﻌﻫ ﻑﺮﻣﺎﯿﯾﺩ."
+        FROM=$(echo "$FROM" | sed 's/[<>]//g')
+        MESSAGE="ﺶﻣﺍ ﯽﮐ ﺎﯿﻤﯿﻟ ﺝﺪﯾﺩ ﺍﺯ ﻁﺮﻓ $FROM \nﺏﺍ ﻡﻮﺿﻮﻋ \\\"$SUBJECT\\\" ﺩﺮﯾﺎﻔﺗ ﻦﻣﻭﺪﻫ ﺎﯾﺩ.\nﻞﻄﻓﺍً ﺏﺭﺎﯾ ﻢﺷﺎﻫﺪﻫ ﺂﻧ ﺐﻫ ﺎﯿﻤﯿﻟ ﺥﻭﺩ ﻡﺭﺎﺠﻌﻫ ﻑﺮﻣﺎﯿﯾﺩ."
         PAYLOAD=$(cat <<EOF
 {
   "Email": "$RECIPIENT",
