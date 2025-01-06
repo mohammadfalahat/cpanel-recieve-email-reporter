@@ -44,7 +44,7 @@ fi
 DATE=$(date +"%Y-%m-%d %H:%M:%S")
 
 RAWSUBJECT=$(grep -i "^Subject: " "$EMAIL_FILE" | sed 's/^Subject: //I' | tr -d "\"\'\`")
-FROM=$(grep -i "^From: " "$EMAIL_FILE" | sed 's/^From: //I' | tr -d "\"\'\`" )
+FROM=$(grep -i "^From: " "$EMAIL_FILE" | sed 's/^From: //I' | sed 's/[<>\"`]*//g' | awk -F'[<>]' '{print $1 $2}' | sed 's/  */ /g')
 SUBJECT=$(decode_utf8 "$RAWSUBJECT")
 
 # Extract recipients
