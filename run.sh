@@ -2,30 +2,30 @@
 
 decode_utf8() {
     local encoded_text="$1"
-    
+
     # Check for UTF-8 Base64 encoded text
     if [[ "$encoded_text" =~ =\?[Uu][Tt][Ff]-8\?B\?(.*)\?\= ]]; then
         local base64_text="${BASH_REMATCH[1]}"
         echo "$base64_text" | base64 --decode
-    # Check for other encodings, e.g., ISO-8859-1 (ISO-8859-15 or others)
-    elif [[ "$encoded_text" =~ =\?[A-Za-z0-9\-]+\?Q\?(.*)\?\= ]]; then
-        # Decode Q-encoded strings (common in ISO-8859-1)
-        local q_encoded_text="${BASH_REMATCH[1]}"
-        echo "$q_encoded_text" | sed 's/_/ /g' | awk '{print toupper($0)}' | base64 --decode
-    # Check for ISO-8859-1 encoded text and decode it
-    elif [[ "$encoded_text" =~ =\?[A-Za-z0-9\-]+\?B\?(.*)\?\= ]]; then
-        local iso_base64_text="${BASH_REMATCH[1]}"
-        echo "$iso_base64_text" | base64 --decode | iconv -f iso-8859-1 -t utf-8
-    # Check for ISO-8859-6 (Arabic) encoded text and decode it
-    elif [[ "$encoded_text" =~ =\?[A-Za-z0-9\-]+\?B\?(.*)\?\= ]]; then
-        local iso_base64_text="${BASH_REMATCH[1]}"
-        echo "$iso_base64_text" | base64 --decode | iconv -f iso-8859-6 -t utf-8
+
+    # Check for Q-encoded text (quoted-printable encoding)
+    elif [[ "$encoded_text" =~ =\?([A-Za-z0-9\-]+)\?Q\?(.*)\?\= ]]; then
+        local charset="${BASH_REMATCH[1]}"
+        local q_encoded_text="${BASH_REMATCH[2]}"
+        # Decode Q-encoding: Replace underscores with spaces, handle =XX hex sequences
+        echo "$q_encoded_text" | sed 's/_/ /g' | perl -pe 's/=([0-9A-Fa-f]{2})/chr(hex($1))/eg' | iconv -f "$charset" -t utf-8
+
+    # Check for other Base64 encoded text with specific charsets
+    elif [[ "$encoded_text" =~ =\?([A-Za-z0-9\-]+)\?B\?(.*)\?\= ]]; then
+        local charset="${BASH_REMATCH[1]}"
+        local base64_text="${BASH_REMATCH[2]}"
+        echo "$base64_text" | base64 --decode | iconv -f "$charset" -t utf-8
+
+    # Fallback: If no encoding is detected, return as is
     else
         echo "$encoded_text"
     fi
 }
-
-
 
 EMAIL_FILE="/tmp/email_$(date +%s)_$$.txt"
 LOG_FILE="/tmp/filter_email.log"
