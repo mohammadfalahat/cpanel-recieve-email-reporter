@@ -56,19 +56,20 @@ RAWSUBJECT=$(grep -i "^Subject: " "$EMAIL_FILE" | sed 's/^Subject: //I' | tr -d 
 FROM=$(grep -i "^From: " "$EMAIL_FILE" | sed 's/^From: //I' | sed 's/[<>\"`]*//g' | awk -F'[<>]' '{print $1 $2}' | sed 's/  */ /g')
 SUBJECT=$(decode_utf8 "$RAWSUBJECT")
 
-# Extract recipients
+# Extract recipients from email file
 TO=$(grep -i "^To: " "$EMAIL_FILE" | sed 's/^To: //I')
 CC=$(grep -i "^Cc: " "$EMAIL_FILE" | sed 's/^Cc: //I')
 BCC=$(grep -i "^Bcc: " "$EMAIL_FILE" | sed 's/^Bcc: //I')
 
-# Process recipients into a single newline-separated list
-ALL_RECIPIENTS=$(echo "$TO,$CC,$BCC" | tr -d '\r' | tr ',' '\n' | sed '/^$/d' | sed -E 's/.*<([^>]+)>.*/\1/')
+# Combine all recipients into a single string
+ALL_RECIPIENTS=$(echo "$TO,$CC,$BCC" | tr -d '\r' | tr ',' '\n' | sed '/^$/d' | sed -E 's/.*<([^>]+)>.*/\1/;t; s/^[ \t]*//')
 
 # Log email details
 echo "$(date): Processing email" >> "$LOG_FILE"
 echo "Date: $DATE" >> "$LOG_FILE"
 echo "From: $FROM" >> "$LOG_FILE"
-echo "Recipients: $ALL_RECIPIENTS" >> "$LOG_FILE"
+echo "Recipients:" >> "$LOG_FILE"
+echo "$ALL_RECIPIENTS" >> "$LOG_FILE"
 echo "Subject: $SUBJECT" >> "$LOG_FILE"
 echo "---" >> "$LOG_FILE"
 
