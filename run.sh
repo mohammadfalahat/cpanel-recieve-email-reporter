@@ -70,7 +70,7 @@ BEGIN { field = ""; }
     field = "";
 }
 END { if (field != "") print field; }
-' "$EMAIL_FILE" | sed -E 's/^(To|Cc|Bcc): //I' | tr -d '\r' | tr ',' '\n' | sed '/^$/d' | sed -E 's/.*<([^>]+)>.*/\1/;t; s/^[ \t]*//' | grep -E '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$' | sort -u)
+' "$EMAIL_FILE" | sed '/^Received:/,/^[^[:space:]]/ { /^Received:/d; /^[[:space:]]/d }' | sed -E 's/^(To|Cc|Bcc): //I' | sed '/^[^:]*:/d' | grep -P '([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})' | sed -E 's/.*<([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>.*/\1/' | sort -u)
 
 
 # Log email details
