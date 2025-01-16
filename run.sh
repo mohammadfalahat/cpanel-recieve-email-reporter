@@ -56,13 +56,22 @@ RAWSUBJECT=$(grep -i "^Subject: " "$EMAIL_FILE" | sed 's/^Subject: //I' | tr -d 
 FROM=$(grep -i "^From: " "$EMAIL_FILE" | sed 's/^From: //I' | sed 's/[<>\"`]*//g' | awk -F'[<>]' '{print $1 $2}' | sed 's/  */ /g')
 SUBJECT=$(decode_utf8 "$RAWSUBJECT")
 
-# Extract recipients from email file
-TO=$(grep -i "^To: " "$EMAIL_FILE" | sed 's/^To: //I')
-CC=$(grep -i "^Cc: " "$EMAIL_FILE" | sed 's/^Cc: //I')
-BCC=$(grep -i "^Bcc: " "$EMAIL_FILE" | sed 's/^Bcc: //I')
+# Extract recipients from email file (handle multiline fields)
+ALL_RECIPIENTS=$(awk '
+BEGIN { field = ""; }
+/^(To|Cc|Bcc):/ {
+    if (field != "") print field;
+    field = $0;
+    next;
+}
+/^\s+/ { field = field " " $0; next; }
+{
+    if (field != "") print field;
+    field = "";
+}
+END { if (field != "") print field; }
+' "$EMAIL_FILE" | sed -E 's/^(To|Cc|Bcc): //I' | tr -d '\r' | tr ',' '\n' | sed '/^$/d' | sed -E 's/.*<([^>]+)>.*/\1/;t; s/^[ \t]*//' | grep -E '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$' | sort -u)
 
-# Combine all recipients into a single string
-ALL_RECIPIENTS=$(echo "$TO,$CC,$BCC" | tr -d '\r' | tr ',' '\n' | sed '/^$/d' | sed -E 's/.*<([^>]+)>.*/\1/;t; s/^[ \t]*//')
 
 # Log email details
 echo "$(date): Processing email" >> "$LOG_FILE"
