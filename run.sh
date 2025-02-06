@@ -8,7 +8,7 @@ decode_utf8() {
         local base64_text="${BASH_REMATCH[1]}"
         echo "$base64_text" | base64 --decode
 
-    # Check for Q-encoded text (quoted-printable encoding)
+    # Check for Q-encoded text (quoted-printable encoding)${EMAIL_FILE}.processed
     elif [[ "$encoded_text" =~ =\?([A-Za-z0-9\-]+)\?Q\?(.*)\?\= ]]; then
         local charset="${BASH_REMATCH[1]}"
         local q_encoded_text="${BASH_REMATCH[2]}"
@@ -93,7 +93,9 @@ awk '
     } 
     next 
   }
-  { print $0 }' "$EMAIL_FILE" > "${EMAIL_FILE}.processed"
+  { print $0 }' "$EMAIL_FILE" | \
+# Remove all Resent-* headers
+sed '/^Resent-/d' > "${EMAIL_FILE}.processed"
 
 # Resend the email using sendmail
 sendmail -t < "${EMAIL_FILE}.processed"
