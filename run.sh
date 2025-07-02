@@ -8,20 +8,21 @@ decode_utf8() {
         local base64_text="${BASH_REMATCH[1]}"
         echo "$base64_text" | base64 --decode
 
-    # Check for Q-encoded text (quoted-printable encoding)${EMAIL_FILE}.processed
+    # Check for Q-encoded text (quoted-printable encoding)
     elif [[ "$encoded_text" =~ =\?([A-Za-z0-9\-]+)\?Q\?(.*)\?\= ]]; then
         local charset="${BASH_REMATCH[1]}"
         local q_encoded_text="${BASH_REMATCH[2]}"
-        # Decode Q-encoding: Replace underscores with spaces, handle =XX hex sequences
-        echo "$q_encoded_text" | sed 's/_/ /g' | perl -pe 's/=([0-9A-Fa-f]{2})/chr(hex($1))/eg' | iconv -f "$charset" -t utf-8
+        echo "$q_encoded_text" \
+          | sed 's/_/ /g' \
+          | perl -pe 's/=([0-9A-Fa-f]{2})/chr(hex($1))/eg' \
+          | iconv -f "$charset" -t utf-8
 
-    # Check for other Base64 encoded text with specific charsets
+    # Other Base64 with specific charset
     elif [[ "$encoded_text" =~ =\?([A-Za-z0-9\-]+)\?B\?(.*)\?\= ]]; then
         local charset="${BASH_REMATCH[1]}"
         local base64_text="${BASH_REMATCH[2]}"
         echo "$base64_text" | base64 --decode | iconv -f "$charset" -t utf-8
 
-    # Fallback: If no encoding is detected, return as is
     else
         echo "$encoded_text"
     fi
@@ -31,84 +32,116 @@ EMAIL_FILE="/tmp/email_$(date +%s)_$$.txt"
 LOG_FILE="/tmp/filter_email.log"
 MAIL_DIR="/home/shonizgl/mail/shoniz.com"
 SENT_FILE="/tmp/sent_messages.txt"
-GRPC_API_URL="185.79.96.19:993" # Your gRPC API endpoint
-API_KEY="---" # Replace with your API key
-PROTO_FILE="/home/shonizgl/MessagingApiService.proto" # Path to the .proto file
-IMPORT_PATH="/home/shonizgl" # Path to the directory containing the .proto file
+MSG_IDS="/tmp/message_ids.txt"
+GRPC_API_URL="31.7.65.195:993"          # Your gRPC API endpoint
+API_KEY="---"  # Replace with your API key
+PROTO_FILE="/home/shonizgl/MessagingApiService.proto"
+IMPORT_PATH="/home/shonizgl"
 
-# Save the incoming email to a temporary file
+# Ensure tracking files exist
+touch "$SENT_FILE" "$MSG_IDS"
+
+# Save the incoming email
 cat > "$EMAIL_FILE"
 
-# Extract X-YourOrg-MailScanner-ID from the email
-MESSAGE_ID=$(grep -i "^X-YourOrg-MailScanner-ID:" "$EMAIL_FILE" | sed 's/^X-YourOrg-MailScanner-ID: //I')
+# Extract MailScanner ID
+MESSAGE_ID=$(grep -i "^X-YourOrg-MailScanner-ID:" "$EMAIL_FILE" \
+    | sed 's/^X-YourOrg-MailScanner-ID: //I')
 
-# Check if the X-YourOrg-MailScanner-ID is in the sent file
-if tail -n 50 "$SENT_FILE" | grep -q "$MESSAGE_ID"; then
+# Skip if this MailScanner-ID was sent already
+if tail -n 1000 "$SENT_FILE" | grep -qF "$MESSAGE_ID"; then
     echo "$(date): Duplicate X-YourOrg-MailScanner-ID found. Skipping email." >> "$LOG_FILE"
     rm -f "$EMAIL_FILE"
     exit 0
 fi
 
-# Extract email details
-DATE=$(date +"%Y-%m-%d %H:%M:%S")
+# Also skip if this ID appears in per-recipient list
+if tail -n 200 "$MSG_IDS" | grep -qF "$MESSAGE_ID"; then
+    echo "$(date): MailScanner-ID already processed (per-recipient). Skipping." >> "$LOG_FILE"
+    rm -f "$EMAIL_FILE"
+    exit 0
+fi
 
-RAWSUBJECT=$(grep -i "^Subject: " "$EMAIL_FILE" | sed 's/^Subject: //I' | tr -d "\"\'\`")
-FROM=$(grep -i "^From: " "$EMAIL_FILE" | sed 's/^From: //I' | sed 's/[<>\"`]*//g' | awk -F'[<>]' '{print $1 $2}' | sed 's/  */ /g')
-SUBJECT=$(decode_utf8 "$RAWSUBJECT")
-
-# Extract recipients from email file (handle multiline fields)
-ALL_RECIPIENTS=$(awk '
-BEGIN { field = ""; }
-/^(To|Cc|Bcc):/ {
-    if (field != "") print field;
-    field = $0;
-    next;
-}
-/^\s+/ { field = field " " $0; next; }
-{
-    if (field != "") print field;
-    field = "";
-}
-END { if (field != "") print field; }
-' "$EMAIL_FILE" | sed '/^Received:/,/^[^[:space:]]/ { /^Received:/d; /^[[:space:]]/d }' | sed -E 's/^(To|Cc|Bcc): //I' | sed '/^[^:]*:/d' | grep -P '([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})' | sed -E 's/.*<([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>.*/\1/' | sort -u)
-
-
-# Log email details
-echo "$(date): Processing email" >> "$LOG_FILE"
-echo "Date: $DATE" >> "$LOG_FILE"
-echo "From: $FROM" >> "$LOG_FILE"
-echo "Recipients:" >> "$LOG_FILE"
-echo "$ALL_RECIPIENTS" >> "$LOG_FILE"
-echo "Subject: $SUBJECT" >> "$LOG_FILE"
-echo "---" >> "$LOG_FILE"
-
-# Insert a custom header (X-Processed-By) between the X-YourOrg-MailScanner headers
+# Insert X-Processed-By after MailScanner-From and strip Resent-* headers
 awk '
   BEGIN { processed = 0 }
-  /X-YourOrg-MailScanner-From:/ { 
-    print $0; 
-    if (processed == 0) { 
-      print "X-Processed-By: MyScript"; 
-      processed = 1; 
-    } 
-    next 
+  /X-YourOrg-MailScanner-From:/ {
+    print $0
+    if (processed == 0) {
+      print "X-Processed-By: MyScript"
+      processed = 1
+    }
+    next
   }
-  { print $0 }' "$EMAIL_FILE" | \
-# Remove all Resent-* headers
-sed '/^Resent-/d' > "${EMAIL_FILE}.processed"
+  { print $0 }
+' "$EMAIL_FILE" | sed '/^Resent-/d' > "${EMAIL_FILE}.processed"
 
-# Resend the email using sendmail
+# Resend via sendmail
 sendmail -t < "${EMAIL_FILE}.processed"
 echo "$(date): Email sent using sendmail." >> "$LOG_FILE"
 
-# Make a gRPC API call for each recipient with @shoniz.com
+# Extract envelope info
+DATE=$(date +"%Y-%m-%d %H:%M:%S")
+RAWSUBJECT=$(grep -i "^Subject: " "$EMAIL_FILE" \
+    | sed 's/^Subject: //I' | tr -d "\"\'\`")
+FROM=$(grep -i "^From: " "$EMAIL_FILE" \
+    | sed 's/^From: //I' \
+    | sed 's/[<>\"`]*//g' \
+    | awk -F'[<>]' '{print $1 $2}' \
+    | sed 's/  */ /g')
+SUBJECT=$(decode_utf8 "$RAWSUBJECT")
+
+# Extract all recipients (To, Cc, Bcc)
+ALL_RECIPIENTS=$(awk '
+BEGIN { field = "" }
+/^(To|Cc|Bcc):/ {
+    if (field != "") print field
+    field = $0
+    next
+}
+/^\s+/ {
+    field = field " " $0
+    next
+}
+{
+    if (field != "") print field
+    field = ""
+}
+END { if (field != "") print field }
+' "$EMAIL_FILE" \
+  | sed -E 's/^(To|Cc|Bcc): //I' \
+  | grep -P '([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})' \
+  | sed -E 's/.*<([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})>.*/\1/' \
+  | sort -u)
+
+# Log header
+{
+  echo "$(date): Processing email"
+  echo "Date: $DATE"
+  echo "From: $FROM"
+  echo "Message-ID: $MESSAGE_ID"
+  echo "Recipients:"
+  echo "$ALL_RECIPIENTS"
+  echo "Subject: $SUBJECT"
+  echo "---"
+} >> "$LOG_FILE"
+
+# gRPC call per recipient
 echo "$ALL_RECIPIENTS" | while read -r RECIPIENT; do
+    RECIPIENT_ID="${MESSAGE_ID}_${RECIPIENT}"
+
+    # Skip if already processed for this recipient
+    if tail -n 200 "$MSG_IDS" | grep -qF "$RECIPIENT_ID"; then
+        echo "$(date): Duplicate for recipient $RECIPIENT. Skipping API call." >> "$LOG_FILE"
+        continue
+    fi
+
     if [[ "$RECIPIENT" == *@shoniz.com ]]; then
         echo "$(date): Making API call for recipient: $RECIPIENT" >> "$LOG_FILE"
 
-        # Create the gRPC payload
-        FROM=$(echo "$FROM" | sed 's/[<>]//g')
+        # Compose the message in Persian
         MESSAGE="شما یک ایمیل جدید از طرف $FROM \nبا موضوع \\\"$SUBJECT\\\" دریافت نموده اید.\nلطفاً برای مشاهده آن به ایمیل خود مراجعه فرمایید."
+
         PAYLOAD=$(cat <<EOF
 {
   "Email": "$RECIPIENT",
@@ -117,23 +150,28 @@ echo "$ALL_RECIPIENTS" | while read -r RECIPIENT; do
 EOF
 )
 
-        # Make the API call using grpcurl
+        # Call gRPC
         /root/go/bin/grpcurl -plaintext \
             -H "x-api-key: $API_KEY" \
             -d "$PAYLOAD" \
-            -proto $PROTO_FILE \
-            -import-path $IMPORT_PATH \
-            $GRPC_API_URL Ding.Contract.Messaging.MessagingApiService/NotifyMessage >> "$LOG_FILE" 2>&1
+            -proto "$PROTO_FILE" \
+            -import-path "$IMPORT_PATH" \
+            "$GRPC_API_URL" Ding.Contract.Messaging.MessagingApiService/NotifyMessage \
+        >> "$LOG_FILE" 2>&1
 
         echo "$(date): API call completed for recipient: $RECIPIENT" >> "$LOG_FILE"
+
+        # Record per-recipient ID
+        echo "$RECIPIENT_ID" >> "$MSG_IDS"
+        echo "$(date): Recorded RECIPIENT_ID $RECIPIENT_ID in $MSG_IDS" >> "$LOG_FILE"
     else
         echo "$(date): Skipping API call for recipient: $RECIPIENT (not @shoniz.com)" >> "$LOG_FILE"
     fi
 done
 
-# Store the X-YourOrg-MailScanner-ID in the sent file to prevent duplicate emails
+# Finally, record the MailScanner-ID so we never resend the same message
 echo "$MESSAGE_ID" >> "$SENT_FILE"
-echo "$(date): Email processed, API calls made where applicable, and X-YourOrg-MailScanner-ID stored." >> "$LOG_FILE"
+echo "$(date): Email processed and MESSAGE_ID stored in $SENT_FILE." >> "$LOG_FILE"
 
-# Clean up temporary files
+# Cleanup
 rm -f "$EMAIL_FILE" "${EMAIL_FILE}.processed"
