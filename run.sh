@@ -1,4 +1,3 @@
-#!/bin/bash
 
 decode_utf8() {
     local encoded_text="$1"
@@ -49,15 +48,19 @@ MESSAGE_ID=$(grep -i "^X-YourOrg-MailScanner-ID:" "$EMAIL_FILE" \
     | sed 's/^X-YourOrg-MailScanner-ID: //I')
 
 # Skip if this MailScanner-ID was sent already
-if tail -n 1000 "$SENT_FILE" | grep -qF "$MESSAGE_ID"; then
+if tail -n 200 "$SENT_FILE" | grep -qF "$MESSAGE_ID"; then
     echo "$(date): Duplicate X-YourOrg-MailScanner-ID found. Skipping email." >> "$LOG_FILE"
     rm -f "$EMAIL_FILE"
     exit 0
 fi
 
-# Also skip if this ID appears in per-recipient list
-if tail -n 200 "$MSG_IDS" | grep -qF "$MESSAGE_ID"; then
-    echo "$(date): MailScanner-ID already processed (per-recipient). Skipping." >> "$LOG_FILE"
+ALT_MSG_ID=$(grep -i "^Message-ID:" "$EMAIL_FILE" \
+            | sed 's/Message-ID:[[:space:]]*//I' \
+            | tr -d '<>' \
+            | tr -d '[:space:]')
+
+if tail -n 200 "$MSG_IDS" | grep -q "$ALT_MSG_ID"; then
+    echo "$(date): Duplicate Message-ID ($ALT_MSG_ID) found. Skipping email." >> "$LOG_FILE"
     rm -f "$EMAIL_FILE"
     exit 0
 fi
@@ -171,7 +174,11 @@ done
 
 # Finally, record the MailScanner-ID so we never resend the same message
 echo "$MESSAGE_ID" >> "$SENT_FILE"
+echo "$ALT_MSG_ID" >> "$MSG_IDS"
+
 echo "$(date): Email processed and MESSAGE_ID stored in $SENT_FILE." >> "$LOG_FILE"
 
 # Cleanup
 rm -f "$EMAIL_FILE" "${EMAIL_FILE}.processed"
+
+           
