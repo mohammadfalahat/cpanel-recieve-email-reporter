@@ -1,3 +1,4 @@
+#!/bin/bash
 
 decode_utf8() {
     local encoded_text="$1"
@@ -33,7 +34,7 @@ MAIL_DIR="/home/shonizgl/mail/shoniz.com"
 SENT_FILE="/tmp/sent_messages.txt"
 MSG_IDS="/tmp/message_ids.txt"
 GRPC_API_URL="31.7.65.195:993"          # Your gRPC API endpoint
-API_KEY="---"  # Replace with your API key
+API_KEY="---"                          # Replace with your API key
 PROTO_FILE="/home/shonizgl/MessagingApiService.proto"
 IMPORT_PATH="/home/shonizgl"
 
@@ -48,18 +49,20 @@ MESSAGE_ID=$(grep -i "^X-YourOrg-MailScanner-ID:" "$EMAIL_FILE" \
     | sed 's/^X-YourOrg-MailScanner-ID: //I')
 
 # Skip if this MailScanner-ID was sent already
-if tail -n 200 "$SENT_FILE" | grep -qF "$MESSAGE_ID"; then
+if tail -n 2000 "$SENT_FILE" | grep -qF "$MESSAGE_ID"; then
     echo "$(date): Duplicate X-YourOrg-MailScanner-ID found. Skipping email." >> "$LOG_FILE"
     rm -f "$EMAIL_FILE"
     exit 0
 fi
 
+# Extract Message-ID (without <>)
 ALT_MSG_ID=$(grep -i "^Message-ID:" "$EMAIL_FILE" \
             | sed 's/Message-ID:[[:space:]]*//I' \
             | tr -d '<>' \
             | tr -d '[:space:]')
 
-if tail -n 200 "$MSG_IDS" | grep -q "$ALT_MSG_ID"; then
+# Skip if this Message-ID was sent already
+if tail -n 2000 "$MSG_IDS" | grep -qF "$ALT_MSG_ID"; then
     echo "$(date): Duplicate Message-ID ($ALT_MSG_ID) found. Skipping email." >> "$LOG_FILE"
     rm -f "$EMAIL_FILE"
     exit 0
@@ -94,35 +97,37 @@ FROM=$(grep -i "^From: " "$EMAIL_FILE" \
     | sed 's/  */ /g')
 SUBJECT=$(decode_utf8 "$RAWSUBJECT")
 
-# Extract all recipients (To, Cc, Bcc)
-ALL_RECIPIENTS=$(awk '
-BEGIN { field = "" }
-/^(To|Cc|Bcc):/ {
-    if (field != "") print field
-    field = $0
-    next
-}
-/^\s+/ {
-    field = field " " $0
-    next
-}
-{
-    if (field != "") print field
-    field = ""
-}
-END { if (field != "") print field }
-' "$EMAIL_FILE" \
-  | sed -E 's/^(To|Cc|Bcc): //I' \
-  | grep -P '([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})' \
-  | sed -E 's/.*<([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})>.*/\1/' \
-  | sort -u)
+# —————————————— استخراج گیرنده‌ها ——————————————
+
+# 1) بلوک هدر تا اولین خط خالی
+HEADER_BLOCK=$(sed -n '1,/^$/p' "$EMAIL_FILE")
+
+# 2) فقط اولین To, Cc و Bcc با ادامه‌خط‌هایشان
+RECIP_HEADER_LINES=$(echo "$HEADER_BLOCK" | awk '
+  BEGIN { to=cc=bcc=0; in=0 }
+/^To:/ && to==0    { line=$0; to=1; in=1; next }
+/^Cc:/ && cc==0    { line=$0; cc=1; in=1; next }
+/^Bcc:/ && bcc==0  { line=$0; bcc=1; in=1; next }
+/^[ \t]/ && in     { line = line " " $0; next }
+in                  { print line; in=0 }
+END { if(in) print line }
+')
+
+# 3) تفکیک بر اساس کاما، بیرون‌کِش ایمیل‌ها و حذف تکراری‌ها
+ALL_RECIPIENTS=$(echo "$RECIP_HEADER_LINES" \
+  | tr ',' '\n' \
+  | sed -E 's/.*<([^>]+)>.*/\1/; s/^[ \t]+|[ \t]+$//g' \
+  | grep -E '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$' \
+  | sort -u
+)
 
 # Log header
 {
   echo "$(date): Processing email"
   echo "Date: $DATE"
   echo "From: $FROM"
-  echo "Message-ID: $MESSAGE_ID"
+  echo "MailScanner-ID: $MESSAGE_ID"
+  echo "Message-ID: $ALT_MSG_ID"
   echo "Recipients:"
   echo "$ALL_RECIPIENTS"
   echo "Subject: $SUBJECT"
@@ -142,7 +147,6 @@ echo "$ALL_RECIPIENTS" | while read -r RECIPIENT; do
     if [[ "$RECIPIENT" == *@shoniz.com ]]; then
         echo "$(date): Making API call for recipient: $RECIPIENT" >> "$LOG_FILE"
 
-        # Compose the message in Persian
         MESSAGE="شما یک ایمیل جدید از طرف $FROM \nبا موضوع \\\"$SUBJECT\\\" دریافت نموده اید.\nلطفاً برای مشاهده آن به ایمیل خود مراجعه فرمایید."
 
         PAYLOAD=$(cat <<EOF
@@ -153,7 +157,6 @@ echo "$ALL_RECIPIENTS" | while read -r RECIPIENT; do
 EOF
 )
 
-        # Call gRPC
         /root/go/bin/grpcurl -plaintext \
             -H "x-api-key: $API_KEY" \
             -d "$PAYLOAD" \
@@ -172,13 +175,11 @@ EOF
     fi
 done
 
-# Finally, record the MailScanner-ID so we never resend the same message
+# Finally, record the MailScanner-ID and Message-ID
 echo "$MESSAGE_ID" >> "$SENT_FILE"
 echo "$ALT_MSG_ID" >> "$MSG_IDS"
 
-echo "$(date): Email processed and MESSAGE_ID stored in $SENT_FILE." >> "$LOG_FILE"
+echo "$(date): Email processed and IDs stored." >> "$LOG_FILE"
 
 # Cleanup
 rm -f "$EMAIL_FILE" "${EMAIL_FILE}.processed"
-
-           
